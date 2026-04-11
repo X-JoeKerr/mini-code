@@ -42,3 +42,9 @@ conda-meta/
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# VSCode settings
+.vscode/
+
+# Temporary files
+tmp/
