@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mini-code"
+version = "0.1.0"
+description = "A modular teaching-oriented coding agent with a CLI, runtime, and team workflow."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "anthropic",
+  "python-dotenv",
+]
+
+[project.scripts]
+mini-code = "mini_code.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
