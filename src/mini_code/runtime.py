@@ -438,8 +438,11 @@ class AgentRuntime:
             "claim_task": lambda **kw: self.task_manager.claim(int(kw["task_id"]), "lead"),
         }
 
-    def _system_prompt(self) -> str:
-        return build_system_prompt(self.skill_loader.descriptions(), self.config.workdir)
+    def _system_prompt(self, reminder: str | None = None) -> str:
+        system = build_system_prompt(self.skill_loader.descriptions(), self.config.workdir)
+        if reminder:
+            system += f"\n{reminder}"
+        return system
 
     def run_turn(self, history: list[dict[str, Any]]) -> bool:
         microcompact(history, keep_recent=self.config.keep_recent_tool_results)
@@ -462,8 +465,11 @@ class AgentRuntime:
         if inbox:
             history.append({"role": "user", "content": f"<inbox>{json.dumps(inbox, indent=2)}</inbox>"})
             history.append({"role": "assistant", "content": "Noted inbox messages."})
+        reminder = None
+        if self.todo_manager.has_open_items() and self.rounds_without_todo >= 3:
+            reminder = "<reminder>Update your todos.</reminder>"
         response = self.provider.create_message(
-            system=self._system_prompt(),
+            system=self._system_prompt(reminder=reminder),
             messages=history,
             tools=self.build_tools(),
             max_tokens=8000,
@@ -492,8 +498,6 @@ class AgentRuntime:
             if block["name"] == "TodoWrite":
                 used_todo = True
         self.rounds_without_todo = 0 if used_todo else self.rounds_without_todo + 1
-        if self.todo_manager.has_open_items() and self.rounds_without_todo >= 3:
-            results.insert(0, {"type": "text", "text": "<reminder>Update your todos.</reminder>"})
         history.append({"role": "user", "content": results})
         if manual_compress:
             history[:] = auto_compact(history, self.provider, self.config, focus=compact_focus)

@@ -21,6 +21,7 @@
 ### `config.py`
 
 - 加载环境变量
+- 默认从工作区 `.env` 或 `MINI_CODE_ENV_FILE` 加载环境文件
 - 校验 `MODEL_ID`
 - 统一工作区路径
 - 暴露运行阈值配置

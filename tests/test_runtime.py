@@ -20,8 +20,17 @@ class FakeResponse:
 class QueueProvider:
     def __init__(self, responses):
         self.responses = list(responses)
+        self.calls = []
 
     def create_message(self, system, messages, tools, max_tokens):
+        self.calls.append(
+            {
+                "system": system,
+                "messages": messages,
+                "tools": tools,
+                "max_tokens": max_tokens,
+            }
+        )
         return self.responses.pop(0)
 
 
@@ -90,12 +99,15 @@ def test_todo_reminder_after_three_rounds(tmp_path):
         FakeResponse(content=[{"type": "tool_use", "id": "1", "name": "task_list", "input": {}}], stop_reason="tool_use"),
         FakeResponse(content=[{"type": "tool_use", "id": "2", "name": "task_list", "input": {}}], stop_reason="tool_use"),
         FakeResponse(content=[{"type": "tool_use", "id": "3", "name": "task_list", "input": {}}], stop_reason="tool_use"),
+        FakeResponse(content=[{"type": "text", "text": "done"}], stop_reason="end_turn"),
     ]
-    _, _, todo, _, _, _, runtime = make_runtime(tmp_path, responses)
+    _, provider, todo, _, _, _, runtime = make_runtime(tmp_path, responses)
     todo.update([{"content": "a", "status": "in_progress", "active_form": "doing a"}])
     history = [{"role": "user", "content": "hello"}]
     runtime.run_turn(history)
     runtime.run_turn(history)
     runtime.run_turn(history)
-    last_user = history[-1]["content"]
-    assert last_user[0]["text"] == "<reminder>Update your todos.</reminder>"
+    runtime.run_turn(history)
+    assert "<reminder>Update your todos.</reminder>" in provider.calls[-1]["system"]
+    last_user = history[-2]["content"]
+    assert all(item.get("type") == "tool_result" for item in last_user)

@@ -12,7 +12,7 @@ from .features.skills import SkillLoader
 from .features.tasks import TaskManager
 from .features.team import MessageBus, PlanApprovalRegistry, ShutdownRegistry, TeammateManager
 from .features.todo import TodoManager
-from .llm import AnthropicProvider
+from .llm import AnthropicProvider, extract_text
 from .runtime import AgentRuntime, auto_compact
 
 
@@ -138,8 +138,23 @@ def run_chat(app: AppContext) -> int:
             continue
         history.append({"role": "user", "content": query})
         app.runtime.agent_loop(history)
+        reply = _extract_last_assistant_reply(history)
+        if reply:
+            print(reply)
         print()
     return 0
+
+
+def _extract_last_assistant_reply(history: list[dict[str, object]]) -> str:
+    for message in reversed(history):
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return extract_text(content)
+    return ""
 
 
 def main(argv: Sequence[str] | None = None) -> int:

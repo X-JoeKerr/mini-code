@@ -15,6 +15,9 @@ export MODEL_ID=your-model-id
 export ANTHROPIC_API_KEY=your-api-key
 ```
 
+也可以在项目工作目录放一个 `.env`，启动时会默认读取它。
+如果想改成别的文件，可以设置 `MINI_CODE_ENV_FILE=/path/to/your.env`。
+
 可选：
 
 ```bash

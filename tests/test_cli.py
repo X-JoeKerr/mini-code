@@ -45,6 +45,14 @@ class DummyApp:
     message_bus: DummyBus
 
 
+@dataclass
+class DummyRuntime:
+    reply: str = "assistant reply"
+
+    def agent_loop(self, history):
+        history.append({"role": "assistant", "content": [{"type": "text", "text": self.reply}]})
+
+
 def test_tasks_list(monkeypatch, capsys):
     monkeypatch.setattr(
         cli,
@@ -79,3 +87,25 @@ def test_parser_accepts_workdir():
     parser = cli.build_parser()
     args = parser.parse_args(["--workdir", "/tmp/demo", "tasks", "list"])
     assert str(args.workdir) == "/tmp/demo"
+
+
+def test_chat_prints_last_assistant_reply(monkeypatch, capsys):
+    app = type(
+        "ChatApp",
+        (),
+        {
+            "task_manager": DummyManager("task"),
+            "teammate_manager": DummyManager("team"),
+            "background_manager": DummyManager("bg"),
+            "message_bus": DummyBus(),
+            "runtime": DummyRuntime("hello from model"),
+            "provider": object(),
+            "config": object(),
+        },
+    )()
+    responses = iter(["hi", "exit"])
+    monkeypatch.setattr(cli, "build_app", lambda workdir=None: app)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+
+    assert cli.main(["chat"]) == 0
+    assert "hello from model" in capsys.readouterr().out

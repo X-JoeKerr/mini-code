@@ -9,6 +9,15 @@ export MODEL_ID=your-model-id
 export ANTHROPIC_API_KEY=your-api-key
 ```
 
+也支持把这些变量写进工作目录下的 `.env`，`mini-code` 启动时会默认读取。
+
+如果需要指定别的环境文件：
+
+```bash
+export MINI_CODE_ENV_FILE=/path/to/mini-code.env
+mini-code chat
+```
+
 可选变量：
 
 ```bash
