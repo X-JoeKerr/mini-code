@@ -10,6 +10,7 @@ from typing import Sequence, TextIO
 
 from .config import AppConfig
 from .features.background import BackgroundManager
+from .features.sessions import SessionManager
 from .features.skills import SkillLoader
 from .features.tasks import TaskManager
 from .features.team import MessageBus, PlanApprovalRegistry, ShutdownRegistry, TeammateManager
@@ -25,6 +26,7 @@ class AppContext:
     config: AppConfig
     provider: AnthropicProvider
     todo_manager: TodoManager
+    session_manager: SessionManager
     skill_loader: SkillLoader
     task_manager: TaskManager
     background_manager: BackgroundManager
@@ -107,10 +109,11 @@ class WaitingPlaceholder:
         self._last_width = len(line)
 
 
-def build_app(workdir: Path | None = None) -> AppContext:
-    config = AppConfig.from_env(workdir=workdir)
+def build_app(workdir: Path | None = None, session_id: str | None = None) -> AppContext:
+    config = AppConfig.from_env(workdir=workdir, session_id=session_id)
     provider = AnthropicProvider(config)
     todo_manager = TodoManager()
+    session_manager = SessionManager(config.paths.sessions_dir)
     skill_loader = SkillLoader(config.paths.skills_dir)
     task_manager = TaskManager(config.paths)
     background_manager = BackgroundManager(config)
@@ -139,6 +142,7 @@ def build_app(workdir: Path | None = None) -> AppContext:
         config=config,
         provider=provider,
         todo_manager=todo_manager,
+        session_manager=session_manager,
         skill_loader=skill_loader,
         task_manager=task_manager,
         background_manager=background_manager,
@@ -201,6 +205,15 @@ def run_chat(app: AppContext) -> int:
             break
         if query.strip().lower() in ("q", "exit", ""):
             break
+        if query.strip() == "/resume":
+            if history:
+                print("[resume unavailable: exit and reopen chat to restore a different session]")
+                continue
+            resumed = _resume_chat_session(app)
+            if resumed is None:
+                continue
+            app, history = resumed
+            continue
         if query.strip() == "/compact":
             if history:
                 try:
@@ -212,6 +225,7 @@ def run_chat(app: AppContext) -> int:
                     )
                 finally:
                     placeholder.clear()
+                _persist_session(app, history)
                 print("[manual compact via /compact]")
             continue
         if query.strip() == "/tasks":
@@ -224,10 +238,12 @@ def run_chat(app: AppContext) -> int:
             print(json.dumps(app.message_bus.read_inbox("lead"), indent=2))
             continue
         history.append({"role": "user", "content": query})
+        _persist_session(app, history)
         try:
             while True:
                 keep_going = app.runtime.run_turn(history, progress=placeholder.update)
                 placeholder.clear()
+                _persist_session(app, history)
                 reply = _extract_last_assistant_reply(history)
                 if reply:
                     print(reply)
@@ -273,6 +289,48 @@ def _format_tool_call(block: dict[str, object]) -> str:
     if len(preview) > TOOL_CALL_PREVIEW_LIMIT:
         preview = f"{preview[: TOOL_CALL_PREVIEW_LIMIT - 3]}..."
     return f"[tool] {tool_name} {preview}"
+
+
+def _persist_session(app: AppContext, history: list[dict[str, object]]) -> None:
+    app.session_manager.save(
+        app.config.session_id,
+        history,
+        app.todo_manager.snapshot(),
+    )
+
+
+def _resume_chat_session(app: AppContext) -> tuple[AppContext, list[dict[str, object]]] | None:
+    sessions = app.session_manager.list_all()
+    if not sessions:
+        print("[no resumable sessions]")
+        return None
+    print("Resumable sessions:")
+    for index, session in enumerate(sessions, start=1):
+        print(
+            f"{index}. {session.updated_at} | {session.message_count} messages | "
+            f"{session.preview}"
+        )
+    while True:
+        choice = input("resume> ").strip()
+        if not choice:
+            print("[resume cancelled]")
+            return None
+        if not choice.isdigit():
+            print("[enter a session number or press Enter to cancel]")
+            continue
+        selected_index = int(choice)
+        if 1 <= selected_index <= len(sessions):
+            break
+        print("[invalid session number]")
+    snapshot = app.session_manager.load(sessions[selected_index - 1].session_id)
+    resumed_app = build_app(app.config.workdir, session_id=snapshot.session_id)
+    resumed_app.todo_manager.restore([item.to_dict() for item in snapshot.todo_items])
+    restored_history = list(snapshot.history)
+    print(
+        f"[resumed session {snapshot.session_id} | {snapshot.updated_at} | "
+        f"{snapshot.message_count} messages]"
+    )
+    return resumed_app, restored_history
 
 
 def main(argv: Sequence[str] | None = None) -> int:

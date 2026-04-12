@@ -19,6 +19,7 @@ class WorkspacePaths:
     team_dir: Path = field(init=False)
     inbox_dir: Path = field(init=False)
     tasks_dir: Path = field(init=False)
+    sessions_dir: Path = field(init=False)
     skills_dir: Path = field(init=False)
     logs_dir: Path = field(init=False)
     llm_logs_dir: Path = field(init=False)
@@ -31,6 +32,7 @@ class WorkspacePaths:
         self.team_dir = self.workdir / ".team"
         self.inbox_dir = self.team_dir / "inbox"
         self.tasks_dir = self.workdir / ".tasks"
+        self.sessions_dir = self.workdir / ".sessions"
         self.skills_dir = self.workdir / "skills"
         self.logs_dir = self.workdir / ".logs"
         self.llm_logs_dir = self.logs_dir / "llm"
@@ -41,6 +43,7 @@ class WorkspacePaths:
     def ensure_directories(self) -> None:
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
+        self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self.llm_logs_dir.mkdir(parents=True, exist_ok=True)
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)
@@ -89,7 +92,11 @@ class AppConfig:
         self.env_file_path = resolve_env_file(self.workdir)
 
     @classmethod
-    def from_env(cls, workdir: Path | None = None) -> "AppConfig":
+    def from_env(
+        cls,
+        workdir: Path | None = None,
+        session_id: str | None = None,
+    ) -> "AppConfig":
         resolved_workdir = (workdir or Path.cwd()).resolve()
         load_dotenv(dotenv_path=resolve_env_file(resolved_workdir), override=True)
         anthropic_base_url = os.getenv("ANTHROPIC_BASE_URL")
@@ -102,6 +109,7 @@ class AppConfig:
             workdir=resolved_workdir,
             model_id=model_id,
             anthropic_base_url=anthropic_base_url,
+            session_id=session_id or generate_session_id(),
         )
         config.paths.ensure_directories()
         return config

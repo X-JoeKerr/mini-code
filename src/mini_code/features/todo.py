@@ -32,6 +32,15 @@ class TodoManager:
         self.items = validated
         return self.render()
 
+    def snapshot(self) -> list[dict[str, str]]:
+        return [item.to_dict() for item in self.items]
+
+    def restore(self, items: list[dict]) -> None:
+        if not items:
+            self.items = []
+            return
+        self.update(items)
+
     def render(self) -> str:
         if not self.items:
             return "No todos."

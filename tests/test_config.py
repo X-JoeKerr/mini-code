@@ -17,6 +17,7 @@ def test_workspace_paths_are_computed(tmp_path):
     paths = WorkspacePaths(tmp_path)
     assert paths.team_dir == tmp_path / ".team"
     assert paths.inbox_dir == tmp_path / ".team" / "inbox"
+    assert paths.sessions_dir == tmp_path / ".sessions"
     assert paths.llm_logs_dir == tmp_path / ".logs" / "llm"
     assert paths.tool_results_dir == tmp_path / ".task_outputs" / "tool-results"
 
@@ -67,3 +68,13 @@ def test_from_env_uses_override_env_file(monkeypatch, tmp_path):
 
     assert config.model_id == "override-model"
     assert config.env_file_path == custom_env
+
+
+def test_from_env_accepts_existing_session_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("MODEL_ID", "test-model")
+
+    config = AppConfig.from_env(tmp_path, session_id="resume-123")
+
+    assert config.session_id == "resume-123"
+    assert config.llm_session_log_path == tmp_path / ".logs" / "llm" / "session_resume-123.jsonl"
+    assert config.paths.sessions_dir.exists()
