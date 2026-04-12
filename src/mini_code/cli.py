@@ -14,8 +14,10 @@ from .features.skills import SkillLoader
 from .features.tasks import TaskManager
 from .features.team import MessageBus, PlanApprovalRegistry, ShutdownRegistry, TeammateManager
 from .features.todo import TodoManager
-from .llm import AnthropicProvider, extract_text
+from .llm import AnthropicProvider, extract_text, iter_tool_uses
 from .runtime import AgentRuntime, auto_compact
+
+TOOL_CALL_PREVIEW_LIMIT = 80
 
 
 @dataclass
@@ -223,12 +225,18 @@ def run_chat(app: AppContext) -> int:
             continue
         history.append({"role": "user", "content": query})
         try:
-            app.runtime.agent_loop(history, progress=placeholder.update)
+            while True:
+                keep_going = app.runtime.run_turn(history, progress=placeholder.update)
+                placeholder.clear()
+                reply = _extract_last_assistant_reply(history)
+                if reply:
+                    print(reply)
+                for tool_call in _extract_last_tool_calls(history):
+                    print(tool_call)
+                if not keep_going:
+                    break
         finally:
             placeholder.clear()
-        reply = _extract_last_assistant_reply(history)
-        if reply:
-            print(reply)
         print()
     return 0
 
@@ -243,6 +251,28 @@ def _extract_last_assistant_reply(history: list[dict[str, object]]) -> str:
         if isinstance(content, list):
             return extract_text(content)
     return ""
+
+
+def _extract_last_tool_calls(history: list[dict[str, object]]) -> list[str]:
+    for message in reversed(history):
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            return []
+        return [_format_tool_call(block) for block in iter_tool_uses(content)]
+    return []
+
+
+def _format_tool_call(block: dict[str, object]) -> str:
+    tool_name = str(block.get("name", "unknown"))
+    tool_input = block.get("input")
+    if not isinstance(tool_input, dict) or not tool_input:
+        return f"[tool] {tool_name}"
+    preview = json.dumps(tool_input, ensure_ascii=False, separators=(",", ":"))
+    if len(preview) > TOOL_CALL_PREVIEW_LIMIT:
+        preview = f"{preview[: TOOL_CALL_PREVIEW_LIMIT - 3]}..."
+    return f"[tool] {tool_name} {preview}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
