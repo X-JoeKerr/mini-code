@@ -49,7 +49,7 @@ class DummyApp:
 class DummyRuntime:
     reply: str = "assistant reply"
 
-    def agent_loop(self, history):
+    def agent_loop(self, history, progress=None):
         history.append({"role": "assistant", "content": [{"type": "text", "text": self.reply}]})
 
 

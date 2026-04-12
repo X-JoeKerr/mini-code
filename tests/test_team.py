@@ -8,7 +8,7 @@ from mini_code.features.team import MessageBus, PlanApprovalRegistry, ShutdownRe
 
 
 class DummyProvider:
-    def create_message(self, system, messages, tools, max_tokens):
+    def create_message(self, system, messages, tools, max_tokens, progress=None):
         raise RuntimeError("not used in this test")
 
 

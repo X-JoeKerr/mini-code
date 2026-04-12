@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, TextIO
 
 from .config import AppConfig
 from .features.background import BackgroundManager
@@ -27,6 +29,80 @@ class AppContext:
     message_bus: MessageBus
     teammate_manager: TeammateManager
     runtime: AgentRuntime
+
+
+class WaitingPlaceholder:
+    FRAMES = ("", ".", "..", "...")
+    LABELS = {
+        "waiting_request": "Sending",
+        "waiting_model": "Thinking",
+        "waiting_tool": "Working",
+    }
+
+    def __init__(
+        self,
+        stream: TextIO | None = None,
+        *,
+        enabled: bool | None = None,
+        interval: float = 0.12,
+    ):
+        self.stream = stream or sys.stdout
+        self.enabled = enabled if enabled is not None else bool(getattr(self.stream, "isatty", lambda: False)())
+        self.interval = interval
+        self._message = ""
+        self._frame_index = 0
+        self._last_width = 0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def update(self, state: str, detail: str | None = None) -> None:
+        if not self.enabled:
+            return
+        message = self.LABELS.get(state, state)
+        if detail and state == "waiting_tool":
+            message = f"{message}: {detail}"
+        with self._lock:
+            self._message = message
+            self._frame_index = 0
+            self._render_locked()
+            if self._thread is None or not self._thread.is_alive():
+                self._stop.clear()
+                self._thread = threading.Thread(target=self._animate, daemon=True)
+                self._thread.start()
+
+    def clear(self) -> None:
+        if not self.enabled:
+            return
+        thread = self._thread
+        self._stop.set()
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=self.interval * 2 + 0.1)
+        with self._lock:
+            self._thread = None
+            self._message = ""
+            blank = " " * self._last_width
+            if blank:
+                self.stream.write(f"\r{blank}\r")
+                self.stream.flush()
+            self._last_width = 0
+            self._frame_index = 0
+
+    def _animate(self) -> None:
+        while not self._stop.wait(self.interval):
+            with self._lock:
+                if not self._message:
+                    continue
+                self._frame_index = (self._frame_index + 1) % len(self.FRAMES)
+                self._render_locked()
+
+    def _render_locked(self) -> None:
+        suffix = self.FRAMES[self._frame_index]
+        line = f"{self._message}{suffix}"
+        padding = max(0, self._last_width - len(line))
+        self.stream.write(f"\r{line}{' ' * padding}")
+        self.stream.flush()
+        self._last_width = len(line)
 
 
 def build_app(workdir: Path | None = None) -> AppContext:
@@ -115,6 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run_chat(app: AppContext) -> int:
     history: list[dict[str, object]] = []
+    placeholder = WaitingPlaceholder()
     while True:
         try:
             query = input("\033[36mmini_code >> \033[0m")
@@ -124,7 +201,15 @@ def run_chat(app: AppContext) -> int:
             break
         if query.strip() == "/compact":
             if history:
-                history[:] = auto_compact(history, app.provider, app.config)
+                try:
+                    history[:] = auto_compact(
+                        history,
+                        app.provider,
+                        app.config,
+                        progress=placeholder.update,
+                    )
+                finally:
+                    placeholder.clear()
                 print("[manual compact via /compact]")
             continue
         if query.strip() == "/tasks":
@@ -137,7 +222,10 @@ def run_chat(app: AppContext) -> int:
             print(json.dumps(app.message_bus.read_inbox("lead"), indent=2))
             continue
         history.append({"role": "user", "content": query})
-        app.runtime.agent_loop(history)
+        try:
+            app.runtime.agent_loop(history, progress=placeholder.update)
+        finally:
+            placeholder.clear()
         reply = _extract_last_assistant_reply(history)
         if reply:
             print(reply)

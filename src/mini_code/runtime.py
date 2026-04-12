@@ -10,7 +10,7 @@ from .features.skills import SkillLoader
 from .features.tasks import TaskManager
 from .features.team import MessageBus, TeammateManager, VALID_MSG_TYPES
 from .features.todo import TodoManager
-from .llm import AnthropicProvider, iter_tool_uses, normalize_content_blocks
+from .llm import AnthropicProvider, ProgressCallback, iter_tool_uses, normalize_content_blocks
 from .prompting import build_system_prompt
 from .tools.files import run_bash, run_edit, run_read, run_write
 from .tools.subagent import SubagentRunner
@@ -56,6 +56,7 @@ def auto_compact(
     provider: AnthropicProvider,
     config: AppConfig,
     focus: str | None = None,
+    progress: ProgressCallback | None = None,
 ) -> list[dict[str, Any]]:
     config.paths.transcripts_dir.mkdir(parents=True, exist_ok=True)
     path = config.paths.transcripts_dir / f"transcript_{int(time.time())}.jsonl"
@@ -74,11 +75,14 @@ def auto_compact(
     )
     if focus:
         prompt += f"\nPay special attention to: {focus}\n"
+    if progress is not None:
+        progress("waiting_request", None)
     response = provider.create_message(
         system=None,
         messages=[{"role": "user", "content": prompt + "\n" + conversation_text}],
         tools=None,
         max_tokens=4000,
+        progress=progress,
     )
     summary_blocks = normalize_content_blocks(getattr(response, "content", []))
     summary = "".join(
@@ -444,10 +448,14 @@ class AgentRuntime:
             system += f"\n{reminder}"
         return system
 
-    def run_turn(self, history: list[dict[str, Any]]) -> bool:
+    def run_turn(
+        self,
+        history: list[dict[str, Any]],
+        progress: ProgressCallback | None = None,
+    ) -> bool:
         microcompact(history, keep_recent=self.config.keep_recent_tool_results)
         if estimate_tokens(history) > self.config.token_threshold:
-            history[:] = auto_compact(history, self.provider, self.config)
+            history[:] = auto_compact(history, self.provider, self.config, progress=progress)
         notifications = self.background_manager.drain()
         if notifications:
             text = "\n".join(
@@ -468,11 +476,14 @@ class AgentRuntime:
         reminder = None
         if self.todo_manager.has_open_items() and self.rounds_without_todo >= 3:
             reminder = "<reminder>Update your todos.</reminder>"
+        if progress is not None:
+            progress("waiting_request", None)
         response = self.provider.create_message(
             system=self._system_prompt(reminder=reminder),
             messages=history,
             tools=self.build_tools(),
             max_tokens=8000,
+            progress=progress,
         )
         assistant_content = normalize_content_blocks(getattr(response, "content", []))
         history.append({"role": "assistant", "content": assistant_content})
@@ -489,6 +500,8 @@ class AgentRuntime:
                 compact_focus = (block.get("input") or {}).get("focus")
             handler = handlers.get(block["name"])
             try:
+                if progress is not None:
+                    progress("waiting_tool", block["name"])
                 tool_input = dict(block.get("input") or {})
                 tool_input["tool_use_id"] = block["id"]
                 output = handler(**tool_input) if handler else f"Unknown tool: {block['name']}"
@@ -500,9 +513,19 @@ class AgentRuntime:
         self.rounds_without_todo = 0 if used_todo else self.rounds_without_todo + 1
         history.append({"role": "user", "content": results})
         if manual_compress:
-            history[:] = auto_compact(history, self.provider, self.config, focus=compact_focus)
+            history[:] = auto_compact(
+                history,
+                self.provider,
+                self.config,
+                focus=compact_focus,
+                progress=progress,
+            )
         return True
 
-    def agent_loop(self, history: list[dict[str, Any]]) -> None:
-        while self.run_turn(history):
+    def agent_loop(
+        self,
+        history: list[dict[str, Any]],
+        progress: ProgressCallback | None = None,
+    ) -> None:
+        while self.run_turn(history, progress=progress):
             continue

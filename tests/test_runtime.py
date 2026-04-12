@@ -22,13 +22,16 @@ class QueueProvider:
         self.responses = list(responses)
         self.calls = []
 
-    def create_message(self, system, messages, tools, max_tokens):
+    def create_message(self, system, messages, tools, max_tokens, progress=None):
+        if progress is not None:
+            progress("waiting_model", None)
         self.calls.append(
             {
                 "system": system,
                 "messages": messages,
                 "tools": tools,
                 "max_tokens": max_tokens,
+                "progress": progress,
             }
         )
         return self.responses.pop(0)
@@ -111,3 +114,26 @@ def test_todo_reminder_after_three_rounds(tmp_path):
     assert "<reminder>Update your todos.</reminder>" in provider.calls[-1]["system"]
     last_user = history[-2]["content"]
     assert all(item.get("type") == "tool_result" for item in last_user)
+
+
+def test_agent_loop_reports_waiting_states(tmp_path):
+    responses = [
+        FakeResponse(
+            content=[{"type": "tool_use", "id": "1", "name": "task_list", "input": {}}],
+            stop_reason="tool_use",
+        ),
+        FakeResponse(content=[{"type": "text", "text": "done"}], stop_reason="end_turn"),
+    ]
+    _, _, _, _, _, _, runtime = make_runtime(tmp_path, responses)
+    history = [{"role": "user", "content": "hello"}]
+    events: list[tuple[str, str | None]] = []
+
+    runtime.agent_loop(history, progress=lambda state, detail=None: events.append((state, detail)))
+
+    assert events == [
+        ("waiting_request", None),
+        ("waiting_model", None),
+        ("waiting_tool", "task_list"),
+        ("waiting_request", None),
+        ("waiting_model", None),
+    ]

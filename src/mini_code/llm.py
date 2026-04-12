@@ -4,6 +4,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, Iterable
@@ -14,6 +15,8 @@ except ImportError:  # pragma: no cover - fallback for bare environments
     Anthropic = None  # type: ignore[assignment]
 
 from .config import AppConfig
+
+ProgressCallback = Callable[[str, str | None], None]
 
 
 def _json_safe(value: Any) -> Any:
@@ -124,6 +127,7 @@ class AnthropicProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
+        progress: ProgressCallback | None = None,
     ) -> Any:
         payload: dict[str, Any] = {
             "model": self.config.model_id,
@@ -134,6 +138,8 @@ class AnthropicProvider:
             payload["system"] = system
         if tools:
             payload["tools"] = tools
+        if progress is not None:
+            progress("waiting_model", None)
         start = time.perf_counter()
         try:
             response = self.client.messages.create(**payload)
