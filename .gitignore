@@ -39,6 +39,15 @@ conda-meta/
 .transcripts/
 .task_outputs/
 
+# Local agent/skill installs
+.agents/
+skills-lock.json
+
+# Local presentation-generation toolchain
+node_modules/
+package.json
+package-lock.json
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
